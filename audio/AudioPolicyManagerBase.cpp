@@ -163,6 +163,11 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(AudioSystem::audio_dev
                    device == AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET ||
                    device == AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT) {
             device = AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET;
+#ifdef OMAP_ENHANCEMENT
+        } else if ((device == AudioSystem::DEVICE_OUT_ANLG_DOCK_HEADSET) ||
+                    (device == AudioSystem::DEVICE_OUT_DGTL_DOCK_HEADSET)) {
+            device = AudioSystem::DEVICE_IN_USB_HEADSET;
+#endif
         } else {
             return NO_ERROR;
         }
@@ -209,7 +214,72 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(AudioSystem::audio_dev
                 mpClientInterface->setParameters(activeInput, param.toString());
             }
         }
+#ifdef OMAP_ENHANCEMENT
+        else {
 
+          if (device == AudioSystem::DEVICE_IN_FM_RADIO_RX) {
+               routing_strategy strategy = getStrategy((AudioSystem::stream_type)AUDIO_STREAM_MUSIC);
+               uint32_t curOutdevice = getDeviceForStrategy(strategy, true);
+               /* If A2DP headset is connected then route FM to Headset */
+               if (curOutdevice == AudioSystem::DEVICE_OUT_ALL_A2DP ||
+                       curOutdevice == AudioSystem::DEVICE_OUT_BLUETOOTH_SCO ||
+                       curOutdevice == AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET ||
+                       curOutdevice == AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT ) {
+                   curOutdevice = AudioSystem::DEVICE_OUT_WIRED_HEADSET;
+               }
+
+             if (state) {
+
+                    /* Get the new input descriptor for FM Rx In */
+                    mfmInput = getFMInput(AUDIO_SOURCE_FM_RADIO_RX, 48000, 1,
+                            AudioSystem::CHANNEL_IN_STEREO, (AudioSystem::audio_in_acoustics)7);
+
+                    /* Open the capture path and do the routing for FM Radio */
+                    AudioParameter param = AudioParameter();
+                    param.addInt(String8(AudioParameter::keyRouting), (int)device);
+                    param.addInt(String8(AudioParameter::keyInputSource), (int)AUDIO_SOURCE_FM_RADIO_RX);
+                    param.addInt(String8("fm_routing"), (int)device);
+                    mpClientInterface->setParameters(mfmInput, param.toString());
+
+
+                   /* Open the current output device again for
+                    * FM Rx playback path to open
+                    */
+                    ALOGV("FM: Output Device = %x",curOutdevice);
+                    //setOutputDevice(mPrimaryOutput, curOutdevice, true);
+                    AudioOutputDescriptor *hwOutputDesc = mOutputs.valueFor(mPrimaryOutput);
+                    hwOutputDesc->mRefCount[AudioSystem::MUSIC]++;
+                    AudioParameter param1 = AudioParameter();
+                    param1.addInt(String8("fm_routing"), (int)curOutdevice);
+                    mpClientInterface->setParameters(mPrimaryOutput, param1.toString());
+
+                    /* Tell the audio flinger playback thread & Record thread that
+                     * FM Rx is active */
+                    mpClientInterface->setFMRxActive(true);
+
+               } else {
+                    AudioOutputDescriptor *hwOutputDesc = mOutputs.valueFor(mPrimaryOutput);
+                    hwOutputDesc->mRefCount[AudioSystem::MUSIC]--;
+
+                    /* Tell the audio flinger playback thread that
+                     * FM Rx is not active now */
+                    mpClientInterface->setFMRxActive(false);
+
+                    /* Release the input descriptor for FM Rx In */
+                    releaseInput(mfmInput);
+                    mfmInput = NULL;
+                    ALOGI("FM: Capture handle for FM released");
+
+                    int newDevice=0;
+                    AudioParameter param = AudioParameter();
+                    /* Close the playback handle */
+                    param.addInt(String8("fm_routing"), (int)newDevice);
+                    mpClientInterface->setParameters(mPrimaryOutput, param.toString());
+                    ALOGI("FM: Playback handle for FM  released..");
+                }
+            }
+        }
+#endif
         return NO_ERROR;
     }
 
@@ -781,6 +851,73 @@ void AudioPolicyManagerBase::releaseOutput(audio_io_handle_t output)
 
 }
 
+#ifdef OMAP_ENHANCEMENT
+audio_io_handle_t AudioPolicyManagerBase::getFMInput(int inputSource,
+                                    uint32_t samplingRate,
+                                    uint32_t format,
+                                    uint32_t channels,
+                                    AudioSystem::audio_in_acoustics acoustics)
+{
+    audio_io_handle_t input = 0;
+    audio_devices_t device = (audio_devices_t)0;
+
+    if (inputSource == AUDIO_SOURCE_FM_RADIO_RX)
+         device = (audio_devices_t)AudioSystem::DEVICE_IN_FM_RADIO_RX;
+    else {
+         /* wrong input source */
+         return 0;
+    }
+
+    IOProfile *profile = getInputProfile(device,
+                                         samplingRate,
+                                         format,
+                                         channels);
+    if (profile == NULL) {
+        ALOGW("getInput() could not find profile for device %04x, samplingRate %d, format %d,"
+                "channelMask %04x",
+                device, samplingRate, format, channels);
+        return 0;
+    }
+
+    if (profile->mModule->mHandle == 0) {
+        ALOGE("getInput(): HW module %s not opened", profile->mModule->mName);
+        return 0;
+    }
+
+    ALOGV("getFMInput() inputSource %d, samplingRate %d, format %d, channels %x, acoustics %x", inputSource, samplingRate, format, channels, acoustics);
+
+
+    AudioInputDescriptor *inputDesc = new AudioInputDescriptor(profile);
+
+    inputDesc->mInputSource = inputSource;
+    inputDesc->mDevice = (audio_devices_t)device;
+    inputDesc->mSamplingRate = samplingRate;
+    inputDesc->mFormat = (audio_format_t)format;
+    inputDesc->mChannelMask = channels;
+    inputDesc->mRefCount = 0;
+    input = mpClientInterface->openInput(profile->mModule->mHandle,
+                                    &inputDesc->mDevice,
+                                    &inputDesc->mSamplingRate,
+                                    &inputDesc->mFormat,
+                                    &inputDesc->mChannelMask);
+
+    // only accept input with the exact requested set of parameters
+    if (input == 0 ||
+        (samplingRate != inputDesc->mSamplingRate) ||
+        (format != inputDesc->mFormat) ||
+        (channels != inputDesc->mChannelMask)) {
+        ALOGV("getInput() failed opening input: samplingRate %d, format %d, channels %d",
+                samplingRate, format, channels);
+        if (input != 0) {
+            mpClientInterface->closeInput(input);
+        }
+        delete inputDesc;
+        return 0;
+    }
+    mInputs.add(input, inputDesc);
+    return input;
+}
+#endif
 audio_io_handle_t AudioPolicyManagerBase::getInput(int inputSource,
                                     uint32_t samplingRate,
                                     uint32_t format,
@@ -2181,6 +2318,24 @@ audio_devices_t AudioPolicyManagerBase::getDeviceForStrategy(routing_strategy st
         if (device2 == 0) {
             device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_ANLG_DOCK_HEADSET;
         }
+#ifdef OMAP_ENHANCEMENT
+        // Once SCO connection is connected, map strategy_media to
+        // SCO headset for music streaming. BT SCO MM_UL use case
+        if (mForceUse[AudioSystem::FOR_COMMUNICATION] == AudioSystem::FORCE_BT_SCO) {
+           if (device2 == 0) {
+                 device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_CARKIT;
+           }
+           if (device2 == 0) {
+                 device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_BLUETOOTH_SCO_HEADSET;
+           }
+           if (device2 == 0) {
+                 device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_BLUETOOTH_SCO;
+           }
+        }
+        if (device2 == 0) {
+           device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_FM_RADIO_TX;
+        }
+#endif
         if (device2 == 0) {
             device2 = mAvailableOutputDevices & AudioSystem::DEVICE_OUT_SPEAKER;
         }
@@ -2366,6 +2521,10 @@ audio_devices_t AudioPolicyManagerBase::getDeviceForInputSource(int inputSource)
         if (mForceUse[AudioSystem::FOR_RECORD] == AudioSystem::FORCE_BT_SCO &&
             mAvailableInputDevices & AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET) {
             device = AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET;
+#ifdef OMAP_ENHANCEMENT
+        } else if (mAvailableInputDevices & AudioSystem::DEVICE_IN_USB_HEADSET) {
+            device = AudioSystem::DEVICE_IN_USB_HEADSET;
+#endif
         } else if (mAvailableInputDevices & AudioSystem::DEVICE_IN_WIRED_HEADSET) {
             device = AudioSystem::DEVICE_IN_WIRED_HEADSET;
         } else if (mAvailableInputDevices & AudioSystem::DEVICE_IN_BUILTIN_MIC) {
@@ -2386,6 +2545,11 @@ audio_devices_t AudioPolicyManagerBase::getDeviceForInputSource(int inputSource)
             device = AudioSystem::DEVICE_IN_VOICE_CALL;
         }
         break;
+#ifdef OMAP_ENHANCEMENT
+    case AUDIO_SOURCE_FM_RADIO_RX:
+        device = AudioSystem::DEVICE_IN_FM_RADIO_RX;
+        break;
+#endif
     default:
         ALOGW("getDeviceForInputSource() invalid input source %d", inputSource);
         break;
@@ -2793,6 +2957,17 @@ void AudioPolicyManagerBase::setStreamMute(int stream,
                               delayMs);
         }
     }
+#ifdef OMAP_ENHANCEMENT
+    if (mfmInput && (stream == AudioSystem::MUSIC) && (output == mPrimaryOutput)) {
+        AudioParameter param = AudioParameter();
+        if (on) {
+            param.addInt(String8("fm_mute"), 1);
+        } else {
+            param.addInt(String8("fm_mute"), 0);
+        }
+        mpClientInterface->setParameters(mPrimaryOutput, param.toString());
+    }
+#endif
 }
 
 void AudioPolicyManagerBase::handleIncallSonification(int stream, bool starting, bool stateChange)
@@ -3258,12 +3433,18 @@ const struct StringToEnum sDeviceNameToEnumTable[] = {
     STRING_TO_ENUM(AUDIO_DEVICE_OUT_USB_DEVICE),
     STRING_TO_ENUM(AUDIO_DEVICE_OUT_USB_ACCESSORY),
     STRING_TO_ENUM(AUDIO_DEVICE_OUT_ALL_USB),
+#ifdef OMAP_ENHANCEMENT
+    STRING_TO_ENUM(AUDIO_DEVICE_OUT_FM_RADIO_TX),
+#endif
     STRING_TO_ENUM(AUDIO_DEVICE_IN_BUILTIN_MIC),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_WIRED_HEADSET),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_AUX_DIGITAL),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_VOICE_CALL),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_BACK_MIC),
+#ifdef OMAP_ENHANCEMENT
+    STRING_TO_ENUM(AUDIO_DEVICE_IN_FM_RADIO_RX),
+#endif
 };
 
 const struct StringToEnum sFlagNameToEnumTable[] = {
