@@ -146,8 +146,7 @@ status_t AudioPolicyManagerBase::setDeviceConnectionState(AudioSystem::audio_dev
             for (size_t i = 0; i < outputs.size(); i++) {
                 // close unused outputs after device disconnection or direct outputs that have been
                 // opened by checkOutputsForDevice() to query dynamic parameters
-                if ((state == AudioSystem::DEVICE_STATE_UNAVAILABLE) ||
-                        (mOutputs.valueFor(outputs[i])->mFlags & AUDIO_OUTPUT_FLAG_DIRECT)) {
+                if ((state == AudioSystem::DEVICE_STATE_UNAVAILABLE))  {
                     closeOutput(outputs[i]);
                 }
             }
@@ -530,7 +529,7 @@ AudioPolicyManagerBase::IOProfile *AudioPolicyManagerBase::getProfileForDirectOu
            IOProfile *profile = mHwModules[i]->mOutputProfiles[j];
            if (profile->isCompatibleProfile(device, samplingRate, format,
                                            channelMask,
-                                           AUDIO_OUTPUT_FLAG_DIRECT)) {
+                                          (audio_output_flags_t)(flags|AUDIO_OUTPUT_FLAG_DIRECT))) {
                if (mAvailableOutputDevices & profile->mSupportedDevices) {
                    return mHwModules[i]->mOutputProfiles[j];
                }
@@ -586,11 +585,15 @@ audio_io_handle_t AudioPolicyManagerBase::getOutput(AudioSystem::stream_type str
 #endif //AUDIO_POLICY_TEST
 
     // open a direct output if required by specified parameters
-    IOProfile *profile = getProfileForDirectOutput(device,
-                                                   samplingRate,
-                                                   format,
-                                                   channelMask,
-                                                   (audio_output_flags_t)flags);
+    IOProfile *profile = NULL;
+    if (flags & AUDIO_OUTPUT_FLAG_DIRECT) {
+        profile = getProfileForDirectOutput(device,
+                                            samplingRate,
+                                            format,
+                                            channelMask,
+                                            (audio_output_flags_t)flags);
+    }
+
     if (profile != NULL) {
 
         ALOGV("getOutput() opening direct output device %x", device);
@@ -1408,8 +1411,8 @@ AudioPolicyManagerBase::AudioPolicyManagerBase(AudioPolicyClientInterface *clien
         for (size_t j = 0; j < mHwModules[i]->mOutputProfiles.size(); j++)
         {
             const IOProfile *outProfile = mHwModules[i]->mOutputProfiles[j];
-
-            if (outProfile->mSupportedDevices & mAttachedOutputDevices) {
+            if ( (outProfile->mSupportedDevices & mAttachedOutputDevices) &&
+                  !(outProfile->mFlags & AUDIO_OUTPUT_FLAG_DIRECT) ){
                 AudioOutputDescriptor *outputDesc = new AudioOutputDescriptor(outProfile);
                 outputDesc->mDevice = (audio_devices_t)(mDefaultOutputDevice &
                                                             outProfile->mSupportedDevices);
@@ -1711,6 +1714,19 @@ status_t AudioPolicyManagerBase::checkOutputsForDevice(audio_devices_t device,
             ALOGV("opening output for device %08x", device);
             desc = new AudioOutputDescriptor(profile);
             desc->mDevice = device;
+#ifdef QCOM_HARDWARE
+            audio_io_handle_t output = 0;
+            if (!(desc->mFlags & AUDIO_OUTPUT_FLAG_LPA || desc->mFlags & AUDIO_OUTPUT_FLAG_TUNNEL ||
+                desc->mFlags & AUDIO_OUTPUT_FLAG_VOIP_RX)) {
+                output =  mpClientInterface->openOutput(profile->mModule->mHandle,
+                                                        &desc->mDevice,
+                                                        &desc->mSamplingRate,
+                                                        &desc->mFormat,
+                                                        &desc->mChannelMask,
+                                                        &desc->mLatency,
+                                                        desc->mFlags);
+            }
+#else
             audio_io_handle_t output = mpClientInterface->openOutput(profile->mModule->mHandle,
                                                                        &desc->mDevice,
                                                                        &desc->mSamplingRate,
@@ -1718,6 +1734,7 @@ status_t AudioPolicyManagerBase::checkOutputsForDevice(audio_devices_t device,
                                                                        &desc->mChannelMask,
                                                                        &desc->mLatency,
                                                                        desc->mFlags);
+#endif
             if (output != 0) {
                 if (desc->mFlags & AUDIO_OUTPUT_FLAG_DIRECT) {
                     String8 reply;
@@ -2521,7 +2538,9 @@ audio_devices_t AudioPolicyManagerBase::getDeviceForInputSource(int inputSource)
     case AUDIO_SOURCE_DEFAULT:
     case AUDIO_SOURCE_MIC:
     case AUDIO_SOURCE_VOICE_RECOGNITION:
+#ifndef QCOM_HARDWARE
     case AUDIO_SOURCE_VOICE_COMMUNICATION:
+#endif
         if (mForceUse[AudioSystem::FOR_RECORD] == AudioSystem::FORCE_BT_SCO &&
             mAvailableInputDevices & AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET) {
             device = AudioSystem::DEVICE_IN_BLUETOOTH_SCO_HEADSET;
@@ -2535,6 +2554,11 @@ audio_devices_t AudioPolicyManagerBase::getDeviceForInputSource(int inputSource)
             device = AudioSystem::DEVICE_IN_BUILTIN_MIC;
         }
         break;
+#ifdef QCOM_HARDWARE
+   case AUDIO_SOURCE_VOICE_COMMUNICATION:
+        device = AudioSystem::DEVICE_IN_COMMUNICATION;
+        break;
+#endif
     case AUDIO_SOURCE_CAMCORDER:
         if (mAvailableInputDevices & AudioSystem::DEVICE_IN_BACK_MIC) {
             device = AudioSystem::DEVICE_IN_BACK_MIC;
@@ -2620,6 +2644,9 @@ AudioPolicyManagerBase::device_category AudioPolicyManagerBase::getDeviceCategor
         case AUDIO_DEVICE_OUT_AUX_DIGITAL:
         case AUDIO_DEVICE_OUT_USB_ACCESSORY:
         case AUDIO_DEVICE_OUT_USB_DEVICE:
+#ifdef QCOM_HARDWARE
+        case AUDIO_DEVICE_OUT_PROXY:
+#endif
         default:
             return DEVICE_CATEGORY_SPEAKER;
     }
@@ -3384,6 +3411,9 @@ bool AudioPolicyManagerBase::IOProfile::isCompatibleProfile(audio_devices_t devi
             return false;
         }
     }
+    ALOGE(" profile found: device %x, flags %x, samplingrate %d,\
+            format %x, channelMask %d",
+            device, flags, samplingRate, format, channelMask);
     return true;
 }
 
@@ -3455,6 +3485,9 @@ const struct StringToEnum sDeviceNameToEnumTable[] = {
 #ifdef OMAP_ENHANCEMENT
     STRING_TO_ENUM(AUDIO_DEVICE_OUT_FM_RADIO_TX),
 #endif
+#ifdef QCOM_HARDWARE
+    STRING_TO_ENUM(AUDIO_DEVICE_OUT_PROXY),
+#endif
     STRING_TO_ENUM(AUDIO_DEVICE_IN_BUILTIN_MIC),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET),
     STRING_TO_ENUM(AUDIO_DEVICE_IN_WIRED_HEADSET),
@@ -3464,6 +3497,9 @@ const struct StringToEnum sDeviceNameToEnumTable[] = {
 #ifdef OMAP_ENHANCEMENT
     STRING_TO_ENUM(AUDIO_DEVICE_IN_FM_RADIO_RX),
 #endif
+#ifdef QCOM_HARDWARE
+    STRING_TO_ENUM(AUDIO_DEVICE_IN_COMMUNICATION),
+#endif
 };
 
 const struct StringToEnum sFlagNameToEnumTable[] = {
@@ -3471,6 +3507,11 @@ const struct StringToEnum sFlagNameToEnumTable[] = {
     STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_PRIMARY),
     STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_FAST),
     STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_DEEP_BUFFER),
+#ifdef QCOM_HARDWARE
+    STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_VOIP_RX),
+    STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_LPA),
+    STRING_TO_ENUM(AUDIO_OUTPUT_FLAG_TUNNEL),
+#endif
 };
 
 const struct StringToEnum sFormatNameToEnumTable[] = {
@@ -3484,6 +3525,12 @@ const struct StringToEnum sFormatNameToEnumTable[] = {
 #endif
     STRING_TO_ENUM(AUDIO_FORMAT_AAC),
     STRING_TO_ENUM(AUDIO_FORMAT_VORBIS),
+#ifdef QCOM_HARDWARE
+    STRING_TO_ENUM(AUDIO_FORMAT_AMR_NB),
+    STRING_TO_ENUM(AUDIO_FORMAT_AMR_WB),
+    STRING_TO_ENUM(AUDIO_FORMAT_QCELP),
+    STRING_TO_ENUM(AUDIO_FORMAT_EVRC),
+#endif
 };
 
 const struct StringToEnum sOutChannelsNameToEnumTable[] = {

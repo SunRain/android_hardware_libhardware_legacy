@@ -261,7 +261,10 @@ public:
 #ifdef QCOM_FM_ENABLED
         DEVICE_OUT_FM = 0x8000,
         DEVICE_OUT_FM_TX = 0x10000,
-        DEVICE_OUT_DEFAULT = 0x80000,
+#endif
+#ifdef QCOM_HARDWARE
+        DEVICE_OUT_PROXY = 0x80000,
+        DEVICE_OUT_DEFAULT = DEVICE_OUT_SPEAKER,
 #else
 #ifdef OMAP_ENHANCEMENT
         DEVICE_OUT_FM_RADIO_TX = 0x20000000,
@@ -279,6 +282,9 @@ public:
 #ifdef OMAP_ENHANCEMENT
                 DEVICE_OUT_FM_RADIO_TX |
 #endif
+#endif
+#ifdef QCOM_HARDWARE
+                DEVICE_OUT_PROXY |
 #endif
                 DEVICE_OUT_DEFAULT),
         DEVICE_OUT_ALL_A2DP = (DEVICE_OUT_BLUETOOTH_A2DP | DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES |
@@ -298,6 +304,8 @@ public:
         DEVICE_IN_FM_RX = 0x20000000,
         DEVICE_IN_FM_RX_A2DP = 0x40000000,
 #endif
+        DEVICE_IN_PROXY = 0x80000000,
+        DEVICE_IN_DEFAULT = DEVICE_IN_BUILTIN_MIC,
 #else
         DEVICE_IN_COMMUNICATION = 0x10000,
         DEVICE_IN_AMBIENT = 0x20000,
@@ -311,21 +319,22 @@ public:
         DEVICE_IN_USB_HEADSET = 0x1000000,
         DEVICE_IN_FM_RADIO_RX = 0x2000000,
 #endif
-#endif
         DEVICE_IN_DEFAULT = 0x80000000,
-
+#endif
         DEVICE_IN_ALL = (DEVICE_IN_COMMUNICATION | DEVICE_IN_AMBIENT | DEVICE_IN_BUILTIN_MIC |
                 DEVICE_IN_BLUETOOTH_SCO_HEADSET | DEVICE_IN_WIRED_HEADSET | DEVICE_IN_AUX_DIGITAL |
-#ifdef QCOM_FM_ENABLED
                 DEVICE_IN_VOICE_CALL | DEVICE_IN_BACK_MIC |
-                DEVICE_IN_FM_RX | DEVICE_IN_FM_RX_A2DP | DEVICE_IN_DEFAULT)
-#else
 #ifdef OMAP_ENHANCEMENT
                 DEVICE_IN_USB_HEADSET |
                 DEVICE_IN_FM_RADIO_RX |
 #endif
-                DEVICE_IN_VOICE_CALL | DEVICE_IN_BACK_MIC | DEVICE_IN_DEFAULT)
+#ifdef QCOM_FM_ENABLED
+                DEVICE_IN_FM_RX | DEVICE_IN_FM_RX_A2DP |
 #endif
+#ifdef QCOM_HARDWARE
+                DEVICE_IN_PROXY |
+#endif
+                DEVICE_IN_DEFAULT)
     };
 
     // request to open a direct output with getOutput() (by opposition to sharing an output with other AudioTracks)
