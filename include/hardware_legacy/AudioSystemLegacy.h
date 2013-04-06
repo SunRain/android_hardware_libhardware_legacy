@@ -61,7 +61,7 @@ enum audio_source {
     AUDIO_SOURCE_CAMCORDER = 5,
     AUDIO_SOURCE_VOICE_RECOGNITION = 6,
     AUDIO_SOURCE_VOICE_COMMUNICATION = 7,
-#ifdef QCOM_FM_ENABLED
+#if defined(QCOM_FM_ENABLED) || defined(STE_FM)
     AUDIO_SOURCE_FM_RX = 8,
     AUDIO_SOURCE_FM_RX_A2DP = 9,
     AUDIO_SOURCE_MAX = AUDIO_SOURCE_FM_RX_A2DP,
@@ -285,7 +285,7 @@ public:
         DEVICE_OUT_DIRECTOUTPUT = 0x2000,
         DEVICE_OUT_SPDIF = 0x4000,
 #endif
-#ifdef QCOM_FM_ENABLED
+#if defined(QCOM_FM_ENABLED) || defined(STE_FM)
         DEVICE_OUT_FM = 0x8000,
         DEVICE_OUT_FM_TX = 0x10000,
 #endif
@@ -303,7 +303,7 @@ public:
                 DEVICE_OUT_BLUETOOTH_SCO_CARKIT | DEVICE_OUT_BLUETOOTH_A2DP | DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES |
                 DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER | DEVICE_OUT_AUX_DIGITAL |
                 DEVICE_OUT_ANLG_DOCK_HEADSET | DEVICE_OUT_DGTL_DOCK_HEADSET |
-#ifdef QCOM_FM_ENABLED
+#if defined(QCOM_FM_ENABLED) || defined(STE_FM)
                 DEVICE_OUT_FM | DEVICE_OUT_FM_TX |
 #else
 #ifdef OMAP_ENHANCEMENT
@@ -327,8 +327,12 @@ public:
         DEVICE_IN_AUX_DIGITAL = 0x2000000,
         DEVICE_IN_VOICE_CALL = 0x4000000,
         DEVICE_IN_BACK_MIC = 0x8000000,
-#ifdef QCOM_FM_ENABLED
+#if defined(QCOM_FM_ENABLED) || defined(STE_FM)
+#if defined(STE_FM)
+        DEVICE_IN_FM_RX = 0x1000000,
+#else
         DEVICE_IN_FM_RX = 0x20000000,
+#endif
         DEVICE_IN_FM_RX_A2DP = 0x40000000,
 #endif
         DEVICE_IN_DEFAULT = DEVICE_IN_BUILTIN_MIC,
@@ -346,6 +350,9 @@ public:
 #ifdef OMAP_ENHANCEMENT
         DEVICE_IN_USB_HEADSET = 0x1000000,
         DEVICE_IN_FM_RADIO_RX = 0x2000000,
+#endif	
+#ifdef STE_FM
+        DEVICE_IN_FM_RX = 0x1000000,
 #endif
         DEVICE_IN_DEFAULT = 0x80000000,
 #endif
@@ -356,7 +363,7 @@ public:
                 DEVICE_IN_USB_HEADSET |
                 DEVICE_IN_FM_RADIO_RX |
 #endif
-#ifdef QCOM_FM_ENABLED
+#if defined(QCOM_FM_ENABLED) || defined(STE_FM)
                 DEVICE_IN_FM_RX | DEVICE_IN_FM_RX_A2DP |
 #endif
 #ifdef QCOM_HARDWARE
